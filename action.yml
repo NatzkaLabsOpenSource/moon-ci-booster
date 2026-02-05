@@ -1,0 +1,29 @@
+name: "moon - CI booster"
+description: "Posts a summary of moon CI failure results with convenient log links."
+inputs:
+  access-token:
+    description: "GitHub access token to post comments."
+    required: true
+  workspace-root:
+    description: "Root of the moon workspace. Defaults to working directory."
+    default: ""
+  max-log-lines:
+    description: "Maximum number of log lines to include inline per task per stream (stdout/stderr). Logs exceeding this are printed to the CI console with a deep-link in the PR comment. 0 to always link, never inline."
+    default: "200"
+  index:
+    description: "Optional index for sharded CI setups. If provided, each shard will maintain a separate comment."
+    default: "1"
+
+outputs:
+  comment-created:
+    description: "Whether or not a comment was created/updated on the pull request."
+  has-failures:
+    description: "'true' if any failing tasks were found."
+  report:
+    description: "The generated failure summary markdown."
+runs:
+  using: node20
+  main: dist/index.js
+branding:
+  icon: "alert-triangle"
+  color: "red"

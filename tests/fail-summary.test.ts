@@ -34,6 +34,7 @@ function baseEnv() {
     "INPUT_ACCESS-TOKEN": "fake-token-for-tests",
     "INPUT_MAX-LOG-LINES": "200",
     "INPUT_WORKSPACE-ROOT": "",
+    "INPUT_JOB-ID": "",
     GITHUB_STEP_SUMMARY: summaryFile,
     GITHUB_OUTPUT: outputFile,
     GITHUB_WORKSPACE: "",
@@ -135,17 +136,11 @@ test("no deep-links without CI environment", async () => {
   expect(summary).not.toContain("View full log in CI output");
 });
 
-test("index input produces shard-specific comment token", async () => {
+test("default comment token when no job-id provided", async () => {
   const cwd = path.join(import.meta.dirname, "workspaces/failures");
 
-  const { stdout: stdout1 } = await $({ cwd, env: { ...process.env, ...baseEnv() } })`node ${indexJs}`;
-  expect(stdout1).toContain("<!-- moon-ci-booster-1 -->");
-
-  const { stdout: stdout2 } = await $({
-    cwd,
-    env: { ...process.env, ...baseEnv(), INPUT_INDEX: "2" },
-  })`node ${indexJs}`;
-  expect(stdout2).toContain("<!-- moon-ci-booster-2 -->");
+  const { stdout } = await $({ cwd, env: { ...process.env, ...baseEnv() } })`node ${indexJs}`;
+  expect(stdout).toContain("<!-- moon-ci-booster-1 -->");
 });
 
 test("ansi codes are stripped from error messages", async () => {

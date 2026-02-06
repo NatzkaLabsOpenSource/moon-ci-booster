@@ -18,8 +18,9 @@ The action _must run after_ the `moon ci` command, and should run even when `moo
   in the PR comment. Set to `0` to always link, never inline. Defaults to `200`.
 - `workspace-root` (`string`) - Root of the moon workspace (if running in a sub-directory).
   Defaults to working directory.
-- `index` (`number`) - Optional index for sharded CI setups. If provided, each shard will
-  maintain a separate comment. Defaults to `1`.
+- `job-id` (`string`) - Numeric job ID for accurate deep-linking in matrix builds. Pass
+  `${{ job.check_run_id }}`. When provided, each matrix job gets its own comment and deep
+  links point to the correct job. Omit for non-matrix workflows.
 
 ## Outputs
 

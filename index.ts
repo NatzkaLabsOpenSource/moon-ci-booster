@@ -106,13 +106,14 @@ interface CILinkContext {
   repository: string;
   runId: number;
   jobId: number;
+  jobName: string;
   stepNumber: number;
   prNumber: number | undefined;
 }
 
 type Octokit = ReturnType<typeof github.getOctokit>;
 
-async function resolveCILinkContext(octokit: Octokit): Promise<CILinkContext | null> {
+async function resolveCILinkContext(octokit: Octokit, jobIdInput: string): Promise<CILinkContext | null> {
   const { runId, serverUrl, payload, repo, job: jobKey } = github.context;
 
   if (!runId || !jobKey) {
@@ -127,11 +128,21 @@ async function resolveCILinkContext(octokit: Octokit): Promise<CILinkContext | n
       filter: "latest",
     });
 
-    const job = data.jobs.find((j) => j.status === "in_progress" && j.name.startsWith(jobKey));
+    const jobIdNum = jobIdInput ? Number(jobIdInput) : undefined;
 
-    if (!job) {
-      core.debug(`Could not find in_progress job matching "${jobKey}" among ${data.jobs.length} jobs`);
-      return null;
+    let job: (typeof data.jobs)[number] | undefined;
+    if (jobIdNum && !Number.isNaN(jobIdNum)) {
+      job = data.jobs.find((j) => j.id === jobIdNum);
+      if (!job) {
+        core.debug(`Could not find job with id=${jobIdNum} among ${data.jobs.length} jobs`);
+        return null;
+      }
+    } else {
+      job = data.jobs.find((j) => j.status === "in_progress" && j.name.startsWith(jobKey));
+      if (!job) {
+        core.debug(`Could not find in_progress job matching "${jobKey}" among ${data.jobs.length} jobs`);
+        return null;
+      }
     }
 
     const step = job.steps?.find((s) => s.status === "in_progress");
@@ -145,6 +156,7 @@ async function resolveCILinkContext(octokit: Octokit): Promise<CILinkContext | n
       repository: `${repo.owner}/${repo.repo}`,
       runId,
       jobId: job.id,
+      jobName: job.name,
       stepNumber: step.number,
       prNumber: payload.pull_request?.number,
     };
@@ -219,8 +231,8 @@ interface FailedTaskInfo {
   stderr: string;
 }
 
-function commentToken(index: number): string {
-  return `<!-- moon-ci-booster-${index} -->`;
+function commentToken(id: string): string {
+  return `<!-- moon-ci-booster-${id} -->`;
 }
 const GITHUB_COMMENT_MAX_SIZE = 65536;
 
@@ -229,10 +241,10 @@ function formatFailureSummary(
   maxLogLines: number,
   linkMap: LogLinkMap,
   ciCtx: CILinkContext | null,
-  index: number,
+  commentId: string,
 ): string {
   const lines: string[] = [
-    commentToken(index),
+    commentToken(commentId),
     "",
     "## :x: Moon CI Failure Summary",
     "",
@@ -308,7 +320,7 @@ function enforceCommentSizeLimit(markdown: string): string {
 
 // --- PR commenting ---
 
-async function postComment(octokit: Octokit, markdown: string, index: number): Promise<void> {
+async function postComment(octokit: Octokit, markdown: string, commentId: string): Promise<void> {
   const {
     payload: { pull_request: pr, issue },
     repo,
@@ -335,7 +347,7 @@ async function postComment(octokit: Octokit, markdown: string, index: number): P
     issue_number: id,
   });
 
-  const token = commentToken(index);
+  const token = commentToken(commentId);
   const existingComment = comments.find((comment) => comment.body?.includes(token));
 
   if (existingComment) {
@@ -362,7 +374,7 @@ async function main(): Promise<void> {
   // biome-ignore lint/complexity/useLiteralKeys: TS strict requires bracket notation for index signatures
   const workspaceRoot = core.getInput("workspace-root") || process.env["GITHUB_WORKSPACE"] || process.cwd();
   const maxLogLines = Number(core.getInput("max-log-lines") || "200");
-  const index = Number(core.getInput("index") || "1");
+  const jobIdInput = core.getInput("job-id");
   core.debug(`Using workspace root ${workspaceRoot}`);
 
   if (!accessToken) {
@@ -409,20 +421,21 @@ async function main(): Promise<void> {
 
   let ciCtx: CILinkContext | null = null;
   if (octokit) {
-    ciCtx = await resolveCILinkContext(octokit);
+    ciCtx = await resolveCILinkContext(octokit, jobIdInput);
     if (ciCtx) {
       core.debug(`Resolved CI link context: job=${ciCtx.jobId}, step=${ciCtx.stepNumber}`);
     }
   }
 
+  const commentId = ciCtx?.jobName ?? "1";
   const linkMap = emitFullLogsToConsole(failures, maxLogLines);
-  const markdown = enforceCommentSizeLimit(formatFailureSummary(failures, maxLogLines, linkMap, ciCtx, index));
+  const markdown = enforceCommentSizeLimit(formatFailureSummary(failures, maxLogLines, linkMap, ciCtx, commentId));
   core.setOutput("report", markdown);
   core.info(markdown);
 
   if (octokit) {
     try {
-      await postComment(octokit, markdown, index);
+      await postComment(octokit, markdown, commentId);
       core.setOutput("comment-created", "true");
     } catch (error: unknown) {
       core.warning(String(error));

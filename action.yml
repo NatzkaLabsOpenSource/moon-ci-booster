@@ -1,5 +1,5 @@
 name: "moon - CI booster"
-description: "Posts a summary of moon CI failure results with convenient log links."
+description: "Posts per-task failure comments with stderr on pull requests and a summary to the job step."
 inputs:
   access-token:
     description: "GitHub access token to post comments."
@@ -7,9 +7,6 @@ inputs:
   workspace-root:
     description: "Root of the moon workspace. Defaults to working directory."
     default: ""
-  max-log-lines:
-    description: "Maximum number of log lines to include inline per task per stream (stdout/stderr). Logs exceeding this are printed to the CI console with a deep-link in the PR comment. 0 to always link, never inline."
-    default: "200"
 
 outputs:
   comment-created:

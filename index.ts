@@ -91,144 +91,9 @@ function stripAnsi(text: string): string {
   return text.replace(/\u001b\[[0-9;]*m/g, "");
 }
 
-function truncateLog(log: string, maxLines: number): string {
-  const lines = log.split("\n");
-  if (lines.length <= maxLines) {
-    return log;
-  }
-  return "";
-}
-
-// --- CI log deep-linking ---
-
-interface CILinkContext {
-  serverUrl: string;
-  repository: string;
-  runId: number;
-  jobId: number;
-  jobName: string;
-  stepNumber: number;
-  prNumber: number | undefined;
-}
-
 type Octokit = ReturnType<typeof github.getOctokit>;
 
-async function resolveCILinkContext(octokit: Octokit): Promise<CILinkContext | null> {
-  const { runId, serverUrl, payload, repo, job: jobKey } = github.context;
-
-  if (!runId || !jobKey) {
-    core.debug("Missing GITHUB_RUN_ID or GITHUB_JOB, skipping CI link resolution");
-    return null;
-  }
-
-  try {
-    const { data } = await octokit.rest.actions.listJobsForWorkflowRun({
-      ...repo,
-      run_id: runId,
-      filter: "latest",
-    });
-
-    const candidates = data.jobs.filter((j) => j.status === "in_progress" && j.name.startsWith(jobKey));
-
-    let job: (typeof data.jobs)[number] | undefined;
-    if (candidates.length > 1) {
-      // biome-ignore lint/complexity/useLiteralKeys: TS strict requires bracket notation for index signatures
-      const runnerName = process.env["RUNNER_NAME"];
-      if (runnerName) {
-        job = candidates.find((j) => j.runner_name === runnerName);
-        if (!job) {
-          core.debug(
-            `Could not find in_progress job matching "${jobKey}" with runner_name="${runnerName}" among ${candidates.length} candidates`,
-          );
-        }
-      } else {
-        core.debug("RUNNER_NAME not set, cannot disambiguate matrix jobs; falling back to first match");
-      }
-    }
-    job ??= candidates[0];
-
-    if (!job) {
-      core.debug(`Could not find in_progress job matching "${jobKey}" among ${data.jobs.length} jobs`);
-      return null;
-    }
-
-    const step = job.steps?.find((s) => s.status === "in_progress");
-    if (!step?.number) {
-      core.debug("Could not find in_progress step");
-      return null;
-    }
-
-    return {
-      serverUrl,
-      repository: `${repo.owner}/${repo.repo}`,
-      runId,
-      jobId: job.id,
-      jobName: job.name,
-      stepNumber: step.number + 1,
-      prNumber: payload.pull_request?.number,
-    };
-  } catch (error) {
-    core.debug(`Failed to resolve CI link context: ${error}`);
-    return null;
-  }
-}
-
-function buildLogDeepLink(ctx: CILinkContext, lineNumber: number): string {
-  const base = `${ctx.serverUrl}/${ctx.repository}/actions/runs/${ctx.runId}/job/${ctx.jobId}`;
-  const query = ctx.prNumber ? `?pr=${ctx.prNumber}` : "";
-  return `${base}${query}#step:${ctx.stepNumber}:${lineNumber}`;
-}
-
-type LogLinkMap = Map<string, { stderrLine?: number; stdoutLine?: number }>;
-
-function emitFullLogsToConsole(failures: FailedTaskInfo[], maxLogLines: number): LogLinkMap {
-  const linkMap: LogLinkMap = new Map();
-  let currentLine = 1;
-
-  for (const failure of failures) {
-    const stderrTrimmed = failure.stderr.trim();
-    const stdoutTrimmed = failure.stdout.trim();
-
-    const stderrTooLong = stderrTrimmed !== "" && stderrTrimmed.split("\n").length > maxLogLines;
-    const stdoutTooLong = stdoutTrimmed !== "" && stdoutTrimmed.split("\n").length > maxLogLines;
-
-    if (!stderrTooLong && !stdoutTooLong) {
-      continue;
-    }
-
-    const links: { stderrLine?: number; stdoutLine?: number } = {};
-
-    if (stderrTooLong) {
-      core.startGroup(`Full stderr for ${failure.target}`);
-      currentLine++;
-
-      links.stderrLine = currentLine;
-      core.info(stripAnsi(stderrTrimmed));
-      currentLine += stderrTrimmed.split("\n").length;
-
-      core.endGroup();
-      currentLine++;
-    }
-
-    if (stdoutTooLong) {
-      core.startGroup(`Full stdout for ${failure.target}`);
-      currentLine++;
-
-      links.stdoutLine = currentLine;
-      core.info(stripAnsi(stdoutTrimmed));
-      currentLine += stdoutTrimmed.split("\n").length;
-
-      core.endGroup();
-      currentLine++;
-    }
-
-    linkMap.set(failure.target, links);
-  }
-
-  return linkMap;
-}
-
-// --- Markdown generation ---
+// --- Console output ---
 
 interface FailedTaskInfo {
   target: string;
@@ -238,81 +103,78 @@ interface FailedTaskInfo {
   stderr: string;
 }
 
+function emitConsoleOutput(failures: FailedTaskInfo[]): void {
+  for (const failure of failures) {
+    const stderrTrimmed = failure.stderr.trim();
+    const stdoutTrimmed = failure.stdout.trim();
+
+    if (stderrTrimmed !== "") {
+      core.startGroup(`stderr for ${failure.target}`);
+      core.info(stripAnsi(stderrTrimmed));
+      core.endGroup();
+    }
+
+    if (stdoutTrimmed !== "") {
+      core.startGroup(`stdout for ${failure.target}`);
+      core.info(stripAnsi(stdoutTrimmed));
+      core.endGroup();
+    }
+  }
+}
+
+// --- Markdown generation ---
+
 function commentToken(id: string): string {
   return `<!-- moon-ci-booster-${id} -->`;
 }
 const GITHUB_COMMENT_MAX_SIZE = 65536;
 
-function formatFailureSummary(
-  failures: FailedTaskInfo[],
-  maxLogLines: number,
-  linkMap: LogLinkMap,
-  ciCtx: CILinkContext | null,
-  commentId: string,
-): string {
+function formatTaskComment(failure: FailedTaskInfo): string {
+  const lines: string[] = [commentToken(failure.target), "", `## :x: \`${failure.target}\``, ""];
+
+  if (failure.error) {
+    lines.push(`**Error:** ${stripAnsi(failure.error)}`);
+    lines.push("");
+  }
+
+  if (failure.command) {
+    lines.push(`**Command:** \`${failure.command}\``);
+    lines.push("");
+  }
+
+  const stderrTrimmed = failure.stderr.trim();
+  if (stderrTrimmed !== "") {
+    lines.push(
+      "<details open><summary><strong>stderr</strong></summary>",
+      "",
+      "```",
+      stripAnsi(stderrTrimmed),
+      "```",
+      "",
+      "</details>",
+      "",
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function formatStepSummary(failures: FailedTaskInfo[]): string {
   const lines: string[] = [
-    commentToken(commentId),
-    "",
     "## :x: Moon CI Failure Summary",
     "",
     `**${failures.length} task${failures.length === 1 ? "" : "s"} failed**`,
     "",
+    "| Target | Error |",
+    "| --- | --- |",
   ];
 
   for (const failure of failures) {
-    lines.push(`### \`${failure.target}\``);
-    lines.push("");
-
-    if (failure.error) {
-      lines.push(`**Error:** ${stripAnsi(failure.error)}`);
-      lines.push("");
-    }
-
-    if (failure.command) {
-      lines.push(`**Command:** \`${failure.command}\``);
-      lines.push("");
-    }
-
-    const truncatedStderr = truncateLog(failure.stderr.trim(), maxLogLines);
-    const truncatedStdout = truncateLog(failure.stdout.trim(), maxLogLines);
-    const links = linkMap.get(failure.target);
-
-    if (truncatedStderr !== "") {
-      lines.push(
-        "<details><summary><strong>stderr</strong></summary>",
-        "",
-        "```",
-        truncatedStderr,
-        "```",
-        "",
-        "</details>",
-        "",
-      );
-    } else if (failure.stderr.trim() !== "" && links?.stderrLine != null && ciCtx) {
-      const url = buildLogDeepLink(ciCtx, links.stderrLine);
-      lines.push(`**stderr:** [View full log in CI output](${url})`, "");
-    }
-
-    if (truncatedStdout !== "") {
-      lines.push(
-        "<details><summary><strong>stdout</strong></summary>",
-        "",
-        "```",
-        truncatedStdout,
-        "```",
-        "",
-        "</details>",
-        "",
-      );
-    } else if (failure.stdout.trim() !== "" && links?.stdoutLine != null && ciCtx) {
-      const url = buildLogDeepLink(ciCtx, links.stdoutLine);
-      lines.push(`**stdout:** [View full log in CI output](${url})`, "");
-    }
-
-    lines.push("---");
-    lines.push("");
+    const error = failure.error ? stripAnsi(failure.error) : "";
+    lines.push(`| \`${failure.target}\` | ${error} |`);
   }
 
+  lines.push("");
   return lines.join("\n");
 }
 
@@ -327,7 +189,7 @@ function enforceCommentSizeLimit(markdown: string): string {
 
 // --- PR commenting ---
 
-async function postComment(octokit: Octokit, markdown: string, commentId: string): Promise<void> {
+async function resolvePRNumber(octokit: Octokit): Promise<number | null> {
   const {
     payload: { pull_request: pr, issue },
     repo,
@@ -346,31 +208,59 @@ async function postComment(octokit: Octokit, markdown: string, commentId: string
 
   if (!id) {
     core.warning("No pull request or issue found, will not add a comment.");
-    return;
   }
 
-  const { data: comments } = await octokit.rest.issues.listComments({
-    ...repo,
-    issue_number: id,
-  });
+  return id ?? null;
+}
 
-  const token = commentToken(commentId);
-  const existingComment = comments.find((comment) => comment.body?.includes(token));
+async function postOrUpdateComment(
+  octokit: Octokit,
+  prNumber: number,
+  existingComments: Array<{ id: number; body?: string | null }>,
+  markdown: string,
+  token: string,
+): Promise<void> {
+  const { repo } = github.context;
+  const existing = existingComments.find((c) => c.body?.includes(token));
 
-  if (existingComment) {
-    core.debug(`Updating existing comment #${existingComment.id}`);
+  if (existing) {
+    core.debug(`Updating existing comment #${existing.id} for token ${token}`);
     await octokit.rest.issues.updateComment({
       ...repo,
       body: markdown,
-      comment_id: existingComment.id,
+      comment_id: existing.id,
     });
   } else {
-    core.debug("Creating a new comment");
+    core.debug(`Creating new comment for token ${token}`);
     await octokit.rest.issues.createComment({
       ...repo,
       body: markdown,
-      issue_number: id,
+      issue_number: prNumber,
     });
+  }
+}
+
+async function deleteStaleComments(
+  octokit: Octokit,
+  existingComments: Array<{ id: number; body?: string | null }>,
+  activeTargets: Set<string>,
+): Promise<void> {
+  const { repo } = github.context;
+
+  for (const comment of existingComments) {
+    if (!comment.body?.includes("<!-- moon-ci-booster-")) continue;
+
+    const match = comment.body.match(/<!-- moon-ci-booster-(.+?) -->/);
+    if (!match) continue;
+
+    const target = match[1] as string;
+    if (!activeTargets.has(target)) {
+      core.debug(`Deleting stale comment #${comment.id} for target ${target}`);
+      await octokit.rest.issues.deleteComment({
+        ...repo,
+        comment_id: comment.id,
+      });
+    }
   }
 }
 
@@ -380,7 +270,6 @@ async function main(): Promise<void> {
   const accessToken = core.getInput("access-token");
   // biome-ignore lint/complexity/useLiteralKeys: TS strict requires bracket notation for index signatures
   const workspaceRoot = core.getInput("workspace-root") || process.env["GITHUB_WORKSPACE"] || process.cwd();
-  const maxLogLines = Number(core.getInput("max-log-lines") || "200");
   core.debug(`Using workspace root ${workspaceRoot}`);
 
   if (!accessToken) {
@@ -401,6 +290,21 @@ async function main(): Promise<void> {
     core.info("No failing tasks found.");
     core.setOutput("has-failures", "false");
     core.setOutput("comment-created", "false");
+
+    // Clean up stale comments from previous runs
+    // biome-ignore lint/complexity/useLiteralKeys: TS strict requires bracket notation for index signatures
+    const inCI = !!process.env["GITHUB_REPOSITORY"];
+    if (inCI) {
+      const octokit = github.getOctokit(accessToken);
+      const prNumber = await resolvePRNumber(octokit);
+      if (prNumber) {
+        const { data: comments } = await octokit.rest.issues.listComments({
+          ...github.context.repo,
+          issue_number: prNumber,
+        });
+        await deleteStaleComments(octokit, comments, new Set());
+      }
+    }
     return;
   }
 
@@ -421,26 +325,37 @@ async function main(): Promise<void> {
     });
   }
 
+  emitConsoleOutput(failures);
+
+  const summaryMarkdown = formatStepSummary(failures);
+  core.setOutput("report", summaryMarkdown);
+  await core.summary.addRaw(summaryMarkdown).write();
+
   // biome-ignore lint/complexity/useLiteralKeys: TS strict requires bracket notation for index signatures
   const inCI = !!process.env["GITHUB_REPOSITORY"];
-  const octokit = inCI ? github.getOctokit(accessToken) : null;
-
-  let ciCtx: CILinkContext | null = null;
-  if (octokit) {
-    ciCtx = await resolveCILinkContext(octokit);
-    if (ciCtx) {
-      core.debug(`Resolved CI link context: job=${ciCtx.jobId}, step=${ciCtx.stepNumber}`);
-    }
-  }
-
-  const commentId = ciCtx?.jobName ?? "1";
-  const linkMap = emitFullLogsToConsole(failures, maxLogLines);
-  const markdown = enforceCommentSizeLimit(formatFailureSummary(failures, maxLogLines, linkMap, ciCtx, commentId));
-  core.setOutput("report", markdown);
-
-  if (octokit) {
+  if (inCI) {
+    const octokit = github.getOctokit(accessToken);
     try {
-      await postComment(octokit, markdown, commentId);
+      const prNumber = await resolvePRNumber(octokit);
+      if (!prNumber) {
+        core.setOutput("comment-created", "false");
+        return;
+      }
+
+      const { data: existingComments } = await octokit.rest.issues.listComments({
+        ...github.context.repo,
+        issue_number: prNumber,
+      });
+
+      const activeTargets = new Set(failures.map((f) => f.target));
+      for (const failure of failures) {
+        const markdown = enforceCommentSizeLimit(formatTaskComment(failure));
+        const token = commentToken(failure.target);
+        await postOrUpdateComment(octokit, prNumber, existingComments, markdown, token);
+      }
+
+      await deleteStaleComments(octokit, existingComments, activeTargets);
+
       core.setOutput("comment-created", "true");
     } catch (error: unknown) {
       core.warning(String(error));
@@ -451,8 +366,6 @@ async function main(): Promise<void> {
     core.debug("No GITHUB_REPOSITORY set, skipping PR comment");
     core.setOutput("comment-created", "false");
   }
-
-  await core.summary.addRaw(markdown).write();
 }
 
 try {

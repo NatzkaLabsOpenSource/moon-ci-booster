@@ -40,7 +40,7 @@ exports[`per-task PR comments > comment text matches snapshot 1`] = `
 ## :x: \`c:make-error\`
 
 **Error:** Task c:make-error failed to run.
-<details open><summary><strong>stderr</strong></summary>
+<details><summary><strong>stderr</strong></summary>
 
 \`\`\`
 This is an error message
@@ -53,7 +53,7 @@ This is an error message
 ## :x: \`b:make-error\`
 
 **Error:** Task b:make-error failed to run.
-<details open><summary><strong>stderr</strong></summary>
+<details><summary><strong>stderr</strong></summary>
 
 \`\`\`
 Error: something went wrong in project b
@@ -66,7 +66,7 @@ Error: something went wrong in project b
 ## :x: \`a:make-error\`
 
 **Error:** Task a:make-error failed to run.
-<details open><summary><strong>stderr</strong></summary>
+<details><summary><strong>stderr</strong></summary>
 
 \`\`\`
 This is an error message

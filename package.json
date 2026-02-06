@@ -23,7 +23,8 @@
   },
   "scripts": {
     "build": "ncc build ./index.ts",
-    "test": "vitest",
+    "test": "vitest run",
+    "test:update": "vitest run --update",
     "typecheck": "tsc --noEmit",
     "lint": "biome ci"
   }

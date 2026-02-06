@@ -149,7 +149,7 @@ function formatTaskComment(failure: FailedTaskInfo): string {
 
   const stderrStripped = stripAnsi(stderrTrimmed);
   const header = headerLines.join("\n");
-  const stderrPrefix = "<details open><summary><strong>stderr</strong></summary>\n\n```\n";
+  const stderrPrefix = "<details><summary><strong>stderr</strong></summary>\n\n```\n";
   const stderrSuffix = "\n```\n\n</details>\n";
   const overhead = header.length + stderrPrefix.length + stderrSuffix.length;
 

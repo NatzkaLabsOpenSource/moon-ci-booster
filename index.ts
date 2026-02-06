@@ -164,7 +164,7 @@ async function resolveCILinkContext(octokit: Octokit): Promise<CILinkContext | n
       runId,
       jobId: job.id,
       jobName: job.name,
-      stepNumber: step.number,
+      stepNumber: step.number + 1,
       prNumber: payload.pull_request?.number,
     };
   } catch (error) {

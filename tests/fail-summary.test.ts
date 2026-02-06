@@ -243,7 +243,7 @@ describe("matrix jobs with RUNNER_NAME disambiguation", () => {
     const summary = fs.readFileSync(summaryFile, "utf8");
     expect(summary).toContain("<!-- moon-ci-booster-test-job (node-20) -->");
     expect(summary).toContain("/job/702");
-    expect(summary).toContain("#step:3:");
+    expect(summary).toContain("#step:4:");
   });
 
   test("comment text includes deep links for correct matrix job", () => {

@@ -95,7 +95,7 @@ Error: something went wrong in project b
 
 </details>
 
-**stdout:** [View full log in CI output](https://github.com/test-owner/test-repo/actions/runs/123/job/456#step:3:2)
+**stdout:** [View full log in CI output](https://github.com/test-owner/test-repo/actions/runs/123/job/456#step:4:2)
 
 ---
 
@@ -214,7 +214,7 @@ Error: something went wrong in project b
 
 </details>
 
-**stdout:** [View full log in CI output](https://github.com/test-owner/test-repo/actions/runs/123/job/702#step:3:2)
+**stdout:** [View full log in CI output](https://github.com/test-owner/test-repo/actions/runs/123/job/702#step:4:2)
 
 ---
 

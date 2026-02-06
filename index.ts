@@ -130,33 +130,37 @@ function commentToken(id: string): string {
 const GITHUB_COMMENT_MAX_SIZE = 65536;
 
 function formatTaskComment(failure: FailedTaskInfo): string {
-  const lines: string[] = [commentToken(failure.target), "", `## :x: \`${failure.target}\``, ""];
+  const headerLines: string[] = [commentToken(failure.target), "", `## :x: \`${failure.target}\``, ""];
 
   if (failure.error) {
-    lines.push(`**Error:** ${stripAnsi(failure.error)}`);
-    lines.push("");
+    headerLines.push(`**Error:** ${stripAnsi(failure.error)}`);
+    headerLines.push("");
   }
 
   if (failure.command) {
-    lines.push(`**Command:** \`${failure.command}\``);
-    lines.push("");
+    headerLines.push(`**Command:** \`${failure.command}\``);
+    headerLines.push("");
   }
 
   const stderrTrimmed = failure.stderr.trim();
-  if (stderrTrimmed !== "") {
-    lines.push(
-      "<details open><summary><strong>stderr</strong></summary>",
-      "",
-      "```",
-      stripAnsi(stderrTrimmed),
-      "```",
-      "",
-      "</details>",
-      "",
-    );
+  if (stderrTrimmed === "") {
+    return headerLines.join("\n");
   }
 
-  return lines.join("\n");
+  const stderrStripped = stripAnsi(stderrTrimmed);
+  const header = headerLines.join("\n");
+  const stderrPrefix = "<details open><summary><strong>stderr</strong></summary>\n\n```\n";
+  const stderrSuffix = "\n```\n\n</details>\n";
+  const overhead = header.length + stderrPrefix.length + stderrSuffix.length;
+
+  if (overhead + stderrStripped.length <= GITHUB_COMMENT_MAX_SIZE) {
+    return `${header}${stderrPrefix}${stderrStripped}${stderrSuffix}`;
+  }
+
+  const truncationNotice = "\n\n> **Note:** Output was truncated to fit within GitHub comment size limits.\n";
+  const budget = GITHUB_COMMENT_MAX_SIZE - overhead - truncationNotice.length - 2; // 2 for "… "
+  const truncatedStderr = `… ${stderrStripped.slice(-budget)}`;
+  return `${header}${stderrPrefix}${truncatedStderr}${stderrSuffix}${truncationNotice}`;
 }
 
 function formatStepSummary(failures: FailedTaskInfo[]): string {

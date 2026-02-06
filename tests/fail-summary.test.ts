@@ -244,3 +244,128 @@ describe("stale comment deletion", () => {
     expect(deletedCommentIds).toEqual([101]);
   });
 });
+
+describe("stderr truncation for large output", () => {
+  let server: http.Server;
+  let createdComments: string[];
+  let workDir: string;
+
+  beforeEach(async () => {
+    createdComments = [];
+
+    // Build a workspace with one failing task that has a massive stderr log
+    workDir = fs.mkdtempSync(path.join(os.tmpdir(), "truncation-test-"));
+    const statesDir = path.join(workDir, ".moon/cache/states/big/fail");
+    fs.mkdirSync(statesDir, { recursive: true });
+
+    // Create a stderr log well over the 65536 character limit
+    const lineCount = 5000;
+    const lines: string[] = [];
+    for (let i = 1; i <= lineCount; i++) {
+      lines.push(`line ${i}: ${"x".repeat(20)} some build output here`);
+    }
+    lines.push("FINAL ERROR: this is the important error at the end");
+    fs.writeFileSync(path.join(statesDir, "stderr.log"), lines.join("\n"));
+    fs.writeFileSync(path.join(statesDir, "stdout.log"), "");
+
+    const ciReport = {
+      actions: [
+        {
+          allowFailure: false,
+          createdAt: "2024-07-14T09:03:50.544893399",
+          duration: { secs: 0, nanos: 100000 },
+          error: "Task big:fail failed.",
+          finishedAt: "2024-07-14T09:03:50.545018275",
+          flaky: false,
+          label: "RunTask(big:fail)",
+          node: {
+            action: "run-task",
+            params: {
+              args: [],
+              env: {},
+              interactive: false,
+              persistent: false,
+              runtime: { platform: "system", requirement: null, overridden: false },
+              target: "big:fail",
+              timeout: null,
+              id: 0,
+            },
+          },
+          nodeIndex: 1,
+          operations: [],
+          startedAt: "2024-07-14T09:03:50.544950983",
+          status: "failed",
+        },
+      ],
+      context: {
+        affectedOnly: false,
+        initialTargets: [],
+        passthroughArgs: [],
+        primaryTargets: ["big:fail"],
+        profile: null,
+        targetStates: {},
+        touchedFiles: [],
+      },
+      duration: { secs: 0, nanos: 100000 },
+    };
+    fs.writeFileSync(path.join(workDir, ".moon/cache/ciReport.json"), JSON.stringify(ciReport));
+
+    server = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+
+      if (req.url?.includes("/commits/") && req.url?.includes("/pulls")) {
+        res.end(JSON.stringify([{ number: 99 }]));
+      } else if (req.url?.includes("/issues/99/comments") && req.method === "GET") {
+        res.end(JSON.stringify([]));
+      } else if (req.url?.includes("/issues/99/comments") && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk: Buffer) => {
+          body += chunk.toString();
+        });
+        req.on("end", () => {
+          createdComments.push(JSON.parse(body).body);
+          res.end(JSON.stringify({ id: 1 }));
+        });
+        return;
+      } else {
+        res.end(JSON.stringify([]));
+      }
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+
+    await $({
+      cwd: workDir,
+      env: {
+        ...process.env,
+        ...baseEnv(),
+        GITHUB_REPOSITORY: "test-owner/test-repo",
+        GITHUB_API_URL: `http://127.0.0.1:${port}`,
+      },
+    })`node ${indexJs}`;
+  });
+
+  afterEach(() => {
+    server.close();
+    fs.rmSync(workDir, { recursive: true, force: true });
+  });
+
+  test("truncates from the start of stderr, preserving the end", () => {
+    expect(createdComments).toHaveLength(1);
+    const comment = createdComments[0];
+
+    // The comment must fit within GitHub's limit
+    expect(comment.length).toBeLessThanOrEqual(65536);
+
+    // The important error at the end should be preserved
+    expect(comment).toContain("FINAL ERROR: this is the important error at the end");
+
+    // Early lines should be truncated away
+    expect(comment).not.toContain("line 1:");
+
+    // Should show truncation indicator and notice
+    expect(comment).toContain("…");
+    expect(comment).toContain("Output was truncated");
+  });
+});

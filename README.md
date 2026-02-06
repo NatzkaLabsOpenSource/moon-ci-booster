@@ -1,6 +1,6 @@
 # moon - CI booster
 
-A GitHub action for [moon](https://moonrepo.dev) that posts a failure summary when `moon ci` tasks fail. The comment includes the error message, the command that was run, and the stdout/stderr logs for each failed task, so you can diagnose failures without leaving the pull request.
+A GitHub action for [moon](https://moonrepo.dev) that posts a failure summary when `moon ci` tasks fail. The comment includes the error message, the command that was run, and the stderr logs for each failed task, so you can diagnose failures without leaving the pull request.
 
 When all tasks pass, the action does nothing.
 
@@ -13,15 +13,10 @@ The action _must run after_ the `moon ci` command, and should run even when `moo
 
 - `access-token` (`string`) - **Required.** A GitHub access token used to post comments on
   the pull request.
-- `max-log-lines` (`number`) - Maximum number of log lines to include inline per task per
-  stream (stdout/stderr). Logs exceeding this are printed to the CI console with a deep-link
-  in the PR comment. Set to `0` to always link, never inline. Defaults to `200`.
 - `workspace-root` (`string`) - Root of the moon workspace (if running in a sub-directory).
   Defaults to working directory.
 
-Sharded matrix CI is supported automatically — the action matches the current runner via
-`RUNNER_NAME` to disambiguate jobs, so each matrix leg gets its own comment with correct
-deep links. No extra configuration is needed.
+[Sharded CI jobs](https://moonrepo.dev/docs/guides/ci#parallelizing-tasks) are supported as the action will output a comment per task.
 
 ## Outputs
 
@@ -31,43 +26,15 @@ deep links. No extra configuration is needed.
 
 ## Example
 
-An example of the failure summary comment looks like the following:
+Each failing task gets its own PR comment. An example looks like:
 
 ---
 
-### :x: Moon CI Failure Summary
-
-**3 tasks failed**
-
-#### `a:make-error`
+## :x: `a:make-error`
 
 **Error:** Task a:make-error failed to run.
 
-**Command:** `make build`
-
-<details><summary><strong>stderr</strong></summary>
-
-```
-make: *** No rule to make target 'build'. Stop.
-```
-
-</details>
-
-<details><summary><strong>stdout</strong></summary>
-
-```
-Building project a...
-```
-
-</details>
-
----
-
-#### `b:make-error`
-
-**Error:** Task b:make-error failed to run.
-
-<details><summary><strong>stderr</strong></summary>
+<details open><summary><strong>stderr</strong></summary>
 
 ```
 make: *** No rule to make target 'build'. Stop.

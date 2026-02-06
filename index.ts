@@ -431,7 +431,6 @@ async function main(): Promise<void> {
   const linkMap = emitFullLogsToConsole(failures, maxLogLines);
   const markdown = enforceCommentSizeLimit(formatFailureSummary(failures, maxLogLines, linkMap, ciCtx, commentId));
   core.setOutput("report", markdown);
-  core.info(markdown);
 
   if (octokit) {
     try {

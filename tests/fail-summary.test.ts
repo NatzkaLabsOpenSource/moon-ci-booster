@@ -1,4 +1,6 @@
 import * as fs from "node:fs";
+import * as http from "node:http";
+import type { AddressInfo } from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { $ } from "execa";
@@ -42,7 +44,7 @@ function baseEnv() {
   };
 }
 
-test("reports failures with logs", async () => {
+test("does not output comment text to console", async () => {
   const cwd = path.join(import.meta.dirname, "workspaces/failures");
   const { stdout } = await $({ cwd, env: { ...process.env, ...baseEnv() } })`node ${indexJs}`;
   expect(stripDebug(stdout)).toMatchSnapshot();
@@ -139,8 +141,9 @@ test("no deep-links without CI environment", async () => {
 test("default comment token when no job-id provided", async () => {
   const cwd = path.join(import.meta.dirname, "workspaces/failures");
 
-  const { stdout } = await $({ cwd, env: { ...process.env, ...baseEnv() } })`node ${indexJs}`;
-  expect(stdout).toContain("<!-- moon-ci-booster-1 -->");
+  await $({ cwd, env: { ...process.env, ...baseEnv() } })`node ${indexJs}`;
+  const summary = fs.readFileSync(summaryFile, "utf8");
+  expect(summary).toContain("<!-- moon-ci-booster-1 -->");
 });
 
 test("ansi codes are stripped from error messages", async () => {
@@ -151,4 +154,58 @@ test("ansi codes are stripped from error messages", async () => {
   // The ciReport.json has ANSI codes in error messages like \u001b[38;5;39m
   // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally matching ANSI escape sequences
   expect(summary).not.toMatch(/\u001b/);
+});
+
+test("long logs emit collapsible blocks and summary includes deep links", async () => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    if (req.url?.includes("/actions/runs/") && req.url?.includes("/jobs")) {
+      res.end(
+        JSON.stringify({
+          total_count: 1,
+          jobs: [
+            {
+              id: 456,
+              name: "test-job",
+              status: "in_progress",
+              steps: [{ number: 3, status: "in_progress", name: "Run tests" }],
+            },
+          ],
+        }),
+      );
+    } else {
+      res.end(JSON.stringify([]));
+    }
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as AddressInfo).port;
+
+  try {
+    const cwd = path.join(import.meta.dirname, "workspaces/failures");
+    const { stdout } = await $({
+      cwd,
+      env: {
+        ...process.env,
+        ...baseEnv(),
+        "INPUT_MAX-LOG-LINES": "1",
+        GITHUB_REPOSITORY: "test-owner/test-repo",
+        GITHUB_RUN_ID: "123",
+        GITHUB_JOB: "test-job",
+        GITHUB_API_URL: `http://127.0.0.1:${port}`,
+        GITHUB_SERVER_URL: "https://github.com",
+      },
+    })`node ${indexJs}`;
+
+    expect(stripDebug(stdout)).toMatchSnapshot();
+
+    // summary should contain deep links pointing to the collapsible blocks
+    const summary = fs.readFileSync(summaryFile, "utf8");
+    expect(summary).toContain("View full log in CI output");
+    expect(summary).toContain(
+      "https://github.com/test-owner/test-repo/actions/runs/123/job/456#step:3:",
+    );
+  } finally {
+    server.close();
+  }
 });

@@ -10,9 +10,6 @@ inputs:
   max-log-lines:
     description: "Maximum number of log lines to include inline per task per stream (stdout/stderr). Logs exceeding this are printed to the CI console with a deep-link in the PR comment. 0 to always link, never inline."
     default: "200"
-  job-id:
-    description: "Numeric job ID for accurate deep-linking in matrix builds. Pass ${{ job.check_run_id }}."
-    default: ""
 
 outputs:
   comment-created:

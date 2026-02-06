@@ -113,7 +113,7 @@ interface CILinkContext {
 
 type Octokit = ReturnType<typeof github.getOctokit>;
 
-async function resolveCILinkContext(octokit: Octokit, jobIdInput: string): Promise<CILinkContext | null> {
+async function resolveCILinkContext(octokit: Octokit): Promise<CILinkContext | null> {
   const { runId, serverUrl, payload, repo, job: jobKey } = github.context;
 
   if (!runId || !jobKey) {
@@ -128,21 +128,28 @@ async function resolveCILinkContext(octokit: Octokit, jobIdInput: string): Promi
       filter: "latest",
     });
 
-    const jobIdNum = jobIdInput ? Number(jobIdInput) : undefined;
+    const candidates = data.jobs.filter((j) => j.status === "in_progress" && j.name.startsWith(jobKey));
 
     let job: (typeof data.jobs)[number] | undefined;
-    if (jobIdNum && !Number.isNaN(jobIdNum)) {
-      job = data.jobs.find((j) => j.id === jobIdNum);
-      if (!job) {
-        core.debug(`Could not find job with id=${jobIdNum} among ${data.jobs.length} jobs`);
-        return null;
+    if (candidates.length > 1) {
+      // biome-ignore lint/complexity/useLiteralKeys: TS strict requires bracket notation for index signatures
+      const runnerName = process.env["RUNNER_NAME"];
+      if (runnerName) {
+        job = candidates.find((j) => j.runner_name === runnerName);
+        if (!job) {
+          core.debug(
+            `Could not find in_progress job matching "${jobKey}" with runner_name="${runnerName}" among ${candidates.length} candidates`,
+          );
+        }
+      } else {
+        core.debug("RUNNER_NAME not set, cannot disambiguate matrix jobs; falling back to first match");
       }
-    } else {
-      job = data.jobs.find((j) => j.status === "in_progress" && j.name.startsWith(jobKey));
-      if (!job) {
-        core.debug(`Could not find in_progress job matching "${jobKey}" among ${data.jobs.length} jobs`);
-        return null;
-      }
+    }
+    job ??= candidates[0];
+
+    if (!job) {
+      core.debug(`Could not find in_progress job matching "${jobKey}" among ${data.jobs.length} jobs`);
+      return null;
     }
 
     const step = job.steps?.find((s) => s.status === "in_progress");
@@ -374,7 +381,6 @@ async function main(): Promise<void> {
   // biome-ignore lint/complexity/useLiteralKeys: TS strict requires bracket notation for index signatures
   const workspaceRoot = core.getInput("workspace-root") || process.env["GITHUB_WORKSPACE"] || process.cwd();
   const maxLogLines = Number(core.getInput("max-log-lines") || "200");
-  const jobIdInput = core.getInput("job-id");
   core.debug(`Using workspace root ${workspaceRoot}`);
 
   if (!accessToken) {
@@ -421,7 +427,7 @@ async function main(): Promise<void> {
 
   let ciCtx: CILinkContext | null = null;
   if (octokit) {
-    ciCtx = await resolveCILinkContext(octokit, jobIdInput);
+    ciCtx = await resolveCILinkContext(octokit);
     if (ciCtx) {
       core.debug(`Resolved CI link context: job=${ciCtx.jobId}, step=${ciCtx.stepNumber}`);
     }

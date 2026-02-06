@@ -36,7 +36,6 @@ function baseEnv() {
     "INPUT_ACCESS-TOKEN": "fake-token-for-tests",
     "INPUT_MAX-LOG-LINES": "200",
     "INPUT_WORKSPACE-ROOT": "",
-    "INPUT_JOB-ID": "",
     GITHUB_STEP_SUMMARY: summaryFile,
     GITHUB_OUTPUT: outputFile,
     GITHUB_WORKSPACE: "",
@@ -178,6 +177,76 @@ describe("long logs with CI context", () => {
   });
 
   test("comment text includes deep links", () => {
+    const summary = fs.readFileSync(summaryFile, "utf8");
+    expect(summary).toMatchSnapshot();
+  });
+});
+
+describe("matrix jobs with RUNNER_NAME disambiguation", () => {
+  let server: http.Server;
+
+  beforeEach(async () => {
+    server = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url?.includes("/actions/runs/") && req.url?.includes("/jobs")) {
+        res.end(
+          JSON.stringify({
+            total_count: 2,
+            jobs: [
+              {
+                id: 701,
+                name: "test-job (node-18)",
+                status: "in_progress",
+                runner_name: "runner-1",
+                steps: [{ number: 2, status: "in_progress", name: "Run moon" }],
+              },
+              {
+                id: 702,
+                name: "test-job (node-20)",
+                status: "in_progress",
+                runner_name: "runner-2",
+                steps: [{ number: 3, status: "in_progress", name: "Run moon" }],
+              },
+            ],
+          }),
+        );
+      } else {
+        res.end(JSON.stringify([]));
+      }
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+
+    const cwd = path.join(import.meta.dirname, "workspaces/failures");
+    await $({
+      cwd,
+      env: {
+        ...process.env,
+        ...baseEnv(),
+        "INPUT_MAX-LOG-LINES": "1",
+        GITHUB_REPOSITORY: "test-owner/test-repo",
+        GITHUB_RUN_ID: "123",
+        GITHUB_JOB: "test-job",
+        GITHUB_API_URL: `http://127.0.0.1:${port}`,
+        GITHUB_SERVER_URL: "https://github.com",
+        RUNNER_NAME: "runner-2",
+      },
+    })`node ${indexJs}`;
+  });
+
+  afterEach(() => {
+    server.close();
+  });
+
+  test("selects the correct matrix job by runner name", () => {
+    const summary = fs.readFileSync(summaryFile, "utf8");
+    expect(summary).toContain("<!-- moon-ci-booster-test-job (node-20) -->");
+    expect(summary).toContain("/job/702");
+    expect(summary).toContain("#step:3:");
+  });
+
+  test("comment text includes deep links for correct matrix job", () => {
     const summary = fs.readFileSync(summaryFile, "utf8");
     expect(summary).toMatchSnapshot();
   });

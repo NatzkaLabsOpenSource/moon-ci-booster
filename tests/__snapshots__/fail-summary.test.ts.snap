@@ -92,3 +92,21 @@ Compiling module B...
 This is an error message
 ::endgroup::"
 `;
+
+exports[`stdout fallback when stderr is empty > falls back to stdout in the PR comment when stderr is empty 1`] = `
+"<!-- moon-ci-booster-app:build -->
+
+## :x: \`app:build\`
+
+**Error:** Task app:build failed.
+<details><summary><strong>stdout</strong></summary>
+
+\`\`\`
+Compiling app...
+Module not found: @missing/dep
+Build failed with 1 error
+\`\`\`
+
+</details>
+"
+`;

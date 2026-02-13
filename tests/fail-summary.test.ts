@@ -369,3 +369,111 @@ describe("stderr truncation for large output", () => {
     expect(comment).toContain("Output was truncated");
   });
 });
+
+describe("stdout fallback when stderr is empty", () => {
+  let server: http.Server;
+  let createdComments: string[];
+  let workDir: string;
+
+  beforeEach(async () => {
+    createdComments = [];
+
+    // Build a workspace with one failing task that has stdout but no stderr
+    workDir = fs.mkdtempSync(path.join(os.tmpdir(), "stdout-fallback-test-"));
+    const statesDir = path.join(workDir, ".moon/cache/states/app/build");
+    fs.mkdirSync(statesDir, { recursive: true });
+
+    fs.writeFileSync(path.join(statesDir, "stderr.log"), "");
+    fs.writeFileSync(
+      path.join(statesDir, "stdout.log"),
+      "Compiling app...\nModule not found: @missing/dep\nBuild failed with 1 error\n",
+    );
+
+    const ciReport = {
+      actions: [
+        {
+          allowFailure: false,
+          createdAt: "2024-07-14T09:03:50.544893399",
+          duration: { secs: 0, nanos: 100000 },
+          error: "Task app:build failed.",
+          finishedAt: "2024-07-14T09:03:50.545018275",
+          flaky: false,
+          label: "RunTask(app:build)",
+          node: {
+            action: "run-task",
+            params: {
+              args: [],
+              env: {},
+              interactive: false,
+              persistent: false,
+              runtime: { platform: "system", requirement: null, overridden: false },
+              target: "app:build",
+              timeout: null,
+              id: 0,
+            },
+          },
+          nodeIndex: 1,
+          operations: [],
+          startedAt: "2024-07-14T09:03:50.544950983",
+          status: "failed",
+        },
+      ],
+      context: {
+        affectedOnly: false,
+        initialTargets: [],
+        passthroughArgs: [],
+        primaryTargets: ["app:build"],
+        profile: null,
+        targetStates: {},
+        touchedFiles: [],
+      },
+      duration: { secs: 0, nanos: 100000 },
+    };
+    fs.writeFileSync(path.join(workDir, ".moon/cache/ciReport.json"), JSON.stringify(ciReport));
+
+    server = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+
+      if (req.url?.includes("/commits/") && req.url?.includes("/pulls")) {
+        res.end(JSON.stringify([{ number: 99 }]));
+      } else if (req.url?.includes("/issues/99/comments") && req.method === "GET") {
+        res.end(JSON.stringify([]));
+      } else if (req.url?.includes("/issues/99/comments") && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk: Buffer) => {
+          body += chunk.toString();
+        });
+        req.on("end", () => {
+          createdComments.push(JSON.parse(body).body);
+          res.end(JSON.stringify({ id: 1 }));
+        });
+        return;
+      } else {
+        res.end(JSON.stringify([]));
+      }
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+
+    await $({
+      cwd: workDir,
+      env: {
+        ...process.env,
+        ...baseEnv(),
+        GITHUB_REPOSITORY: "test-owner/test-repo",
+        GITHUB_API_URL: `http://127.0.0.1:${port}`,
+      },
+    })`node ${indexJs}`;
+  });
+
+  afterEach(() => {
+    server.close();
+    fs.rmSync(workDir, { recursive: true, force: true });
+  });
+
+  test("falls back to stdout in the PR comment when stderr is empty", () => {
+    expect(createdComments).toHaveLength(1);
+    expect(createdComments[0]).toMatchSnapshot();
+  });
+});

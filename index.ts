@@ -143,24 +143,30 @@ function formatTaskComment(failure: FailedTaskInfo): string {
   }
 
   const stderrTrimmed = failure.stderr.trim();
-  if (stderrTrimmed === "") {
+  const stdoutTrimmed = failure.stdout.trim();
+
+  // Prefer stderr; fall back to stdout when stderr is empty
+  const output = stderrTrimmed !== "" ? stderrTrimmed : stdoutTrimmed;
+  const outputLabel = stderrTrimmed !== "" ? "stderr" : "stdout";
+
+  if (output === "") {
     return headerLines.join("\n");
   }
 
-  const stderrStripped = stripAnsi(stderrTrimmed);
+  const outputStripped = stripAnsi(output);
   const header = headerLines.join("\n");
-  const stderrPrefix = "<details><summary><strong>stderr</strong></summary>\n\n```\n";
-  const stderrSuffix = "\n```\n\n</details>\n";
-  const overhead = header.length + stderrPrefix.length + stderrSuffix.length;
+  const prefix = `<details><summary><strong>${outputLabel}</strong></summary>\n\n\`\`\`\n`;
+  const suffix = "\n```\n\n</details>\n";
+  const overhead = header.length + prefix.length + suffix.length;
 
-  if (overhead + stderrStripped.length <= GITHUB_COMMENT_MAX_SIZE) {
-    return `${header}${stderrPrefix}${stderrStripped}${stderrSuffix}`;
+  if (overhead + outputStripped.length <= GITHUB_COMMENT_MAX_SIZE) {
+    return `${header}${prefix}${outputStripped}${suffix}`;
   }
 
   const truncationNotice = "\n\n> **Note:** Output was truncated to fit within GitHub comment size limits.\n";
   const budget = GITHUB_COMMENT_MAX_SIZE - overhead - truncationNotice.length - 2; // 2 for "… "
-  const truncatedStderr = `… ${stderrStripped.slice(-budget)}`;
-  return `${header}${stderrPrefix}${truncatedStderr}${stderrSuffix}${truncationNotice}`;
+  const truncatedOutput = `… ${outputStripped.slice(-budget)}`;
+  return `${header}${prefix}${truncatedOutput}${suffix}${truncationNotice}`;
 }
 
 function formatStepSummary(failures: FailedTaskInfo[]): string {

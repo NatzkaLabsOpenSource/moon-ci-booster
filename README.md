@@ -1,6 +1,6 @@
 # moon - CI booster
 
-A GitHub action for [moon](https://moonrepo.dev) that posts a failure summary when `moon ci` tasks fail. The comment includes the error message, the command that was run, and the stderr logs for each failed task, so you can diagnose failures without leaving the pull request.
+A GitHub action for [moon](https://moonrepo.dev) that posts a failure summary when `moon ci` tasks fail. The comment includes the error message, the command that was run, and the error logs for each failed task, so you can diagnose failures without leaving the pull request.
 
 When all tasks pass, the action does nothing.
 

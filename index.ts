@@ -109,14 +109,14 @@ function emitConsoleOutput(failures: FailedTaskInfo[]): void {
     const stdoutTrimmed = failure.stdout.trim();
 
     if (stderrTrimmed !== "") {
-      core.startGroup(`stderr for ${failure.target}`);
-      core.info(stripAnsi(stderrTrimmed));
+      core.startGroup(`stderr for failed target ${failure.target}`);
+      core.info(stderrTrimmed);
       core.endGroup();
     }
 
     if (stdoutTrimmed !== "") {
-      core.startGroup(`stdout for ${failure.target}`);
-      core.info(stripAnsi(stdoutTrimmed));
+      core.startGroup(`stdout for failed target ${failure.target}`);
+      core.info(stdoutTrimmed);
       core.endGroup();
     }
   }
@@ -146,8 +146,19 @@ function formatTaskComment(failure: FailedTaskInfo): string {
   const stdoutTrimmed = failure.stdout.trim();
 
   // Prefer stderr; fall back to stdout when stderr is empty
-  const output = stderrTrimmed !== "" ? stderrTrimmed : stdoutTrimmed;
-  const outputLabel = stderrTrimmed !== "" ? "stderr" : "stdout";
+  let output = "";
+  let outputLabel = "none";
+
+  if (stderrTrimmed !== "" && stdoutTrimmed !== "") {
+    output = `${stderrTrimmed}\n${stdoutTrimmed}`;
+    outputLabel = "stderr + stdout";
+  } else if (stderrTrimmed !== "") {
+    output = stderrTrimmed;
+    outputLabel = "stderr";
+  } else if (stdoutTrimmed !== "") {
+    output = stdoutTrimmed;
+    outputLabel = "stdout";
+  }
 
   if (output === "") {
     return headerLines.join("\n");

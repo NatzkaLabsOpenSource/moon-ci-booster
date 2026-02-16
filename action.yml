@@ -4,6 +4,9 @@ inputs:
   access-token:
     description: "GitHub access token to post comments."
     required: true
+  job-group:
+    description: "Job group name used to differentiate between different jobs."
+    default: "all"
   workspace-root:
     description: "Root of the moon workspace. Defaults to working directory."
     default: ""

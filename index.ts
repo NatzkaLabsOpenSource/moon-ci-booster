@@ -124,8 +124,14 @@ function emitConsoleOutput(failures: FailedTaskInfo[]): void {
 
 // --- Markdown generation ---
 
+function commentTag(): string {
+  const jobGroup = core.getInput("job-group") || "all";
+
+  return `moon-ci-booster-${jobGroup}`;
+}
+
 function commentToken(id: string): string {
-  return `<!-- moon-ci-booster-${id} -->`;
+  return `<!-- ${commentTag()}-${id} -->`;
 }
 const GITHUB_COMMENT_MAX_SIZE = 65536;
 
@@ -269,9 +275,9 @@ async function deleteStaleComments(
   const { repo } = github.context;
 
   for (const comment of existingComments) {
-    if (!comment.body?.includes("<!-- moon-ci-booster-")) continue;
+    if (!comment.body?.includes(`<!-- ${commentTag()}-`)) continue;
 
-    const match = comment.body.match(/<!-- moon-ci-booster-(.+?) -->/);
+    const match = comment.body.match(new RegExp(`<!-- ${commentTag()}-(.+?) -->`));
     if (!match) continue;
 
     const target = match[1] as string;

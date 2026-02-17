@@ -136,8 +136,8 @@ function commentToken(id: string): string {
 const GITHUB_COMMENT_MAX_SIZE = 65536;
 
 function formatTaskComment(failure: FailedTaskInfo): string {
-  const jobGroup = core.getInput("job-group") || '';
-  const jobGroupPrefix = jobGroup ? `${jobGroup}: ` : '';
+  const jobGroup = core.getInput("job-group") || "";
+  const jobGroupPrefix = jobGroup ? `${jobGroup}: ` : "";
 
   const headerLines: string[] = [commentToken(failure.target), "", `## :x: \`${jobGroupPrefix}${failure.target}\``, ""];
 

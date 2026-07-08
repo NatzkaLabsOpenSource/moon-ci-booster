@@ -19,7 +19,7 @@ outputs:
   report:
     description: "The generated failure summary markdown."
 runs:
-  using: node20
+  using: node24
   main: dist/index.js
 branding:
   icon: "alert-triangle"

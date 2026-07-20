@@ -328,9 +328,10 @@ async function main(): Promise<void> {
       const octokit = github.getOctokit(accessToken);
       const prNumber = await resolvePRNumber(octokit);
       if (prNumber) {
-        const { data: comments } = await octokit.rest.issues.listComments({
+        const comments = await octokit.paginate(octokit.rest.issues.listComments, {
           ...github.context.repo,
           issue_number: prNumber,
+          per_page: 100,
         });
         await deleteStaleComments(octokit, comments, new Set());
       }
@@ -372,9 +373,10 @@ async function main(): Promise<void> {
         return;
       }
 
-      const { data: existingComments } = await octokit.rest.issues.listComments({
+      const existingComments = await octokit.paginate(octokit.rest.issues.listComments, {
         ...github.context.repo,
         issue_number: prNumber,
+        per_page: 100,
       });
 
       const activeTargets = new Set(failures.map((f) => f.target));

@@ -226,7 +226,7 @@ function formatStepSummary(failures: FailedTaskInfo[]): string {
   return lines.join("\n");
 }
 
-function formatAggregateComment(failures: FailedTaskInfo[], threshold: number): string {
+function formatAggregateComment(failures: FailedTaskInfo[]): string {
   const jobGroup = core.getInput("job-group") || "";
   const jobGroupPrefix = jobGroup ? `${jobGroup}: ` : "";
 
@@ -235,9 +235,8 @@ function formatAggregateComment(failures: FailedTaskInfo[], threshold: number): 
     "",
     `## :x: ${jobGroupPrefix}${failures.length} tasks failed`,
     "",
-    `There are ${failures.length} failing tasks (threshold is ${threshold}). Individual comments are ` +
-      "suppressed to keep this pull request readable — this usually means something is fundamentally " +
-      "broken (for example an invalid `Cargo.toml` or workspace config). See the job logs for full output.",
+    `There are ${failures.length} failing tasks. Individual comments are ` +
+      "suppressed to keep this pull request readable. See the job logs for full output.",
     "",
     "| Target | Error |",
     "| --- | --- |",
@@ -434,7 +433,7 @@ async function main(): Promise<void> {
         core.info(
           `${failures.length} failing tasks reached the aggregate threshold (${threshold}), posting a single aggregate comment.`,
         );
-        const markdown = enforceCommentSizeLimit(formatAggregateComment(failures, threshold));
+        const markdown = enforceCommentSizeLimit(formatAggregateComment(failures));
         const token = commentToken(AGGREGATE_ID);
         await postOrUpdateComment(octokit, prNumber, existingComments, markdown, token);
         activeTargets.add(AGGREGATE_ID);

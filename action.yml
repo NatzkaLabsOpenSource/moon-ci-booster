@@ -10,12 +10,17 @@ inputs:
   workspace-root:
     description: "Root of the moon workspace. Defaults to working directory."
     default: ""
+  aggregate-threshold:
+    description: "When the number of failing tasks reaches this threshold, a single aggregate comment is posted instead of one comment per task."
+    default: "10"
 
 outputs:
   comment-created:
     description: "Whether or not a comment was created/updated on the pull request."
   has-failures:
     description: "'true' if any failing tasks were found."
+  aggregated:
+    description: "'true' if a single aggregate comment was posted instead of per-task comments."
   report:
     description: "The generated failure summary markdown."
 runs:

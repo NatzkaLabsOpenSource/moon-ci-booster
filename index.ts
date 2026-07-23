@@ -133,6 +133,24 @@ function commentTag(): string {
 function commentToken(id: string): string {
   return `<!-- ${commentTag()}-${id} -->`;
 }
+
+// Id used for the single aggregate comment. Real task ids are always
+// `project:task` (they contain a colon), so this can never collide with one.
+const AGGREGATE_ID = "aggregate";
+
+const DEFAULT_AGGREGATE_THRESHOLD = 10;
+
+// When the number of failing tasks reaches this threshold, a single aggregate
+// comment is posted instead of one comment per task, to keep the PR readable.
+function getAggregateThreshold(): number {
+  const raw = core.getInput("aggregate-threshold");
+  if (!raw) {
+    return DEFAULT_AGGREGATE_THRESHOLD;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_AGGREGATE_THRESHOLD;
+}
+
 const GITHUB_COMMENT_MAX_SIZE = 65536;
 
 function formatTaskComment(failure: FailedTaskInfo): string {
@@ -194,6 +212,32 @@ function formatStepSummary(failures: FailedTaskInfo[]): string {
     "## :x: Moon CI Failure Summary",
     "",
     `**${failures.length} task${failures.length === 1 ? "" : "s"} failed**`,
+    "",
+    "| Target | Error |",
+    "| --- | --- |",
+  ];
+
+  for (const failure of failures) {
+    const error = failure.error ? stripAnsi(failure.error) : "";
+    lines.push(`| \`${failure.target}\` | ${error} |`);
+  }
+
+  lines.push("");
+  return lines.join("\n");
+}
+
+function formatAggregateComment(failures: FailedTaskInfo[], threshold: number): string {
+  const jobGroup = core.getInput("job-group") || "";
+  const jobGroupPrefix = jobGroup ? `${jobGroup}: ` : "";
+
+  const lines: string[] = [
+    commentToken(AGGREGATE_ID),
+    "",
+    `## :x: ${jobGroupPrefix}${failures.length} tasks failed`,
+    "",
+    `There are ${failures.length} failing tasks (threshold is ${threshold}). Individual comments are ` +
+      "suppressed to keep this pull request readable — this usually means something is fundamentally " +
+      "broken (for example an invalid `Cargo.toml` or workspace config). See the job logs for full output.",
     "",
     "| Target | Error |",
     "| --- | --- |",
@@ -341,6 +385,8 @@ async function main(): Promise<void> {
 
   core.setOutput("has-failures", "true");
 
+  const threshold = getAggregateThreshold();
+
   const failures: FailedTaskInfo[] = [];
   for (const action of failedActions) {
     const target = action.node.params.target;
@@ -379,16 +425,32 @@ async function main(): Promise<void> {
         per_page: 100,
       });
 
-      const activeTargets = new Set(failures.map((f) => f.target));
-      for (const failure of failures) {
-        const markdown = enforceCommentSizeLimit(formatTaskComment(failure));
-        const token = commentToken(failure.target);
+      // Tracks the ids that should survive cleanup this run. In aggregate mode
+      // this is just the aggregate id, so any leftover per-task comments from a
+      // previous run get deleted (and vice versa).
+      const activeTargets = new Set<string>();
+
+      if (failures.length >= threshold) {
+        core.info(
+          `${failures.length} failing tasks reached the aggregate threshold (${threshold}), posting a single aggregate comment.`,
+        );
+        const markdown = enforceCommentSizeLimit(formatAggregateComment(failures, threshold));
+        const token = commentToken(AGGREGATE_ID);
         await postOrUpdateComment(octokit, prNumber, existingComments, markdown, token);
+        activeTargets.add(AGGREGATE_ID);
+      } else {
+        for (const failure of failures) {
+          const markdown = enforceCommentSizeLimit(formatTaskComment(failure));
+          const token = commentToken(failure.target);
+          await postOrUpdateComment(octokit, prNumber, existingComments, markdown, token);
+          activeTargets.add(failure.target);
+        }
       }
 
       await deleteStaleComments(octokit, existingComments, activeTargets);
 
       core.setOutput("comment-created", "true");
+      core.setOutput("aggregated", String(failures.length >= threshold));
     } catch (error: unknown) {
       core.warning(String(error));
       core.notice("\nFailed to create comment on pull request. Perhaps this is ran in a fork?\n");

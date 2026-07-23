@@ -1,17 +1,17 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`failures with default settings > console output contains collapsible blocks for all tasks 1`] = `
-"::group::stderr for c:make-error
+"::group::stderr for failed target c:make-error
 This is an error message
 ::endgroup::
-::group::stderr for b:make-error
+::group::stderr for failed target b:make-error
 Error: something went wrong in project b
 ::endgroup::
-::group::stdout for b:make-error
+::group::stdout for failed target b:make-error
 Starting build...
 Compiling module B...
 ::endgroup::
-::group::stderr for a:make-error
+::group::stderr for failed target a:make-error
 This is an error message
 ::endgroup::"
 `;
@@ -35,7 +35,7 @@ exports[`no report warns gracefully 1`] = `"::warning::Run report does not exist
 
 exports[`per-task PR comments > comment text matches snapshot 1`] = `
 [
-  "<!-- moon-ci-booster-c:make-error -->
+  "<!-- moon-ci-booster-all-c:make-error -->
 
 ## :x: \`c:make-error\`
 
@@ -48,20 +48,22 @@ This is an error message
 
 </details>
 ",
-  "<!-- moon-ci-booster-b:make-error -->
+  "<!-- moon-ci-booster-all-b:make-error -->
 
 ## :x: \`b:make-error\`
 
 **Error:** Task b:make-error failed to run.
-<details><summary><strong>stderr</strong></summary>
+<details><summary><strong>stderr + stdout</strong></summary>
 
 \`\`\`
 Error: something went wrong in project b
+Starting build...
+Compiling module B...
 \`\`\`
 
 </details>
 ",
-  "<!-- moon-ci-booster-a:make-error -->
+  "<!-- moon-ci-booster-all-a:make-error -->
 
 ## :x: \`a:make-error\`
 
@@ -78,23 +80,23 @@ This is an error message
 `;
 
 exports[`per-task PR comments > console output still contains collapsible blocks 1`] = `
-"::group::stderr for c:make-error
+"::group::stderr for failed target c:make-error
 This is an error message
 ::endgroup::
-::group::stderr for b:make-error
+::group::stderr for failed target b:make-error
 Error: something went wrong in project b
 ::endgroup::
-::group::stdout for b:make-error
+::group::stdout for failed target b:make-error
 Starting build...
 Compiling module B...
 ::endgroup::
-::group::stderr for a:make-error
+::group::stderr for failed target a:make-error
 This is an error message
 ::endgroup::"
 `;
 
 exports[`stdout fallback when stderr is empty > falls back to stdout in the PR comment when stderr is empty 1`] = `
-"<!-- moon-ci-booster-app:build -->
+"<!-- moon-ci-booster-all-app:build -->
 
 ## :x: \`app:build\`
 

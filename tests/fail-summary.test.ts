@@ -154,17 +154,17 @@ describe("per-task PR comments", () => {
   });
 
   test("each comment contains the correct comment token", () => {
-    expect(createdComments[0]).toContain("<!-- moon-ci-booster-c:make-error -->");
-    expect(createdComments[1]).toContain("<!-- moon-ci-booster-b:make-error -->");
-    expect(createdComments[2]).toContain("<!-- moon-ci-booster-a:make-error -->");
+    expect(createdComments[0]).toContain("<!-- moon-ci-booster-all-c:make-error -->");
+    expect(createdComments[1]).toContain("<!-- moon-ci-booster-all-b:make-error -->");
+    expect(createdComments[2]).toContain("<!-- moon-ci-booster-all-a:make-error -->");
   });
 
-  test("comments contain stderr but not stdout", () => {
+  test("comments contain stderr and stdout when both are present", () => {
     for (const comment of createdComments) {
       if (comment.includes("b:make-error")) {
         expect(comment).toContain("something went wrong in project b");
-        expect(comment).not.toContain("Starting build");
-        expect(comment).not.toContain("Compiling module B");
+        expect(comment).toContain("Starting build");
+        expect(comment).toContain("Compiling module B");
       }
     }
   });
@@ -193,8 +193,8 @@ describe("stale comment deletion", () => {
       } else if (req.url?.includes("/issues/42/comments") && req.method === "GET") {
         res.end(
           JSON.stringify([
-            { id: 100, body: "<!-- moon-ci-booster-c:make-error -->\nold failure" },
-            { id: 101, body: "<!-- moon-ci-booster-old:gone-task -->\nstale failure" },
+            { id: 100, body: "<!-- moon-ci-booster-all-c:make-error -->\nold failure" },
+            { id: 101, body: "<!-- moon-ci-booster-all-old:gone-task -->\nstale failure" },
             { id: 102, body: "unrelated comment" },
           ]),
         );
@@ -367,6 +367,200 @@ describe("stderr truncation for large output", () => {
     // Should show truncation indicator and notice
     expect(comment).toContain("…");
     expect(comment).toContain("Output was truncated");
+  });
+});
+
+function makeFailingAction(target: string) {
+  return {
+    allowFailure: false,
+    createdAt: "2024-07-14T09:03:50.544893399",
+    duration: { secs: 0, nanos: 100000 },
+    error: `Task ${target} failed to run.`,
+    finishedAt: "2024-07-14T09:03:50.545018275",
+    flaky: false,
+    label: `RunTask(${target})`,
+    node: {
+      action: "run-task",
+      params: {
+        args: [],
+        env: {},
+        interactive: false,
+        persistent: false,
+        runtime: { platform: "system", requirement: null, overridden: false },
+        target,
+        timeout: null,
+        id: 0,
+      },
+    },
+    nodeIndex: 1,
+    operations: [],
+    startedAt: "2024-07-14T09:03:50.544950983",
+    status: "failed",
+  };
+}
+
+function writeReportWithFailures(workDir: string, targets: string[]) {
+  const ciReport = {
+    actions: targets.map(makeFailingAction),
+    context: {
+      affectedOnly: false,
+      initialTargets: [],
+      passthroughArgs: [],
+      primaryTargets: targets,
+      profile: null,
+      targetStates: {},
+      touchedFiles: [],
+    },
+    duration: { secs: 0, nanos: 100000 },
+  };
+  fs.mkdirSync(path.join(workDir, ".moon/cache"), { recursive: true });
+  fs.writeFileSync(path.join(workDir, ".moon/cache/ciReport.json"), JSON.stringify(ciReport));
+}
+
+describe("aggregate comment when failures reach the threshold", () => {
+  let server: http.Server;
+  let createdComments: string[];
+  let deletedCommentIds: number[];
+  let workDir: string;
+
+  beforeEach(async () => {
+    createdComments = [];
+    deletedCommentIds = [];
+
+    workDir = fs.mkdtempSync(path.join(os.tmpdir(), "aggregate-test-"));
+    const targets = Array.from({ length: 12 }, (_, i) => `proj${i}:build`);
+    writeReportWithFailures(workDir, targets);
+
+    server = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+
+      if (req.url?.includes("/commits/") && req.url?.includes("/pulls")) {
+        res.end(JSON.stringify([{ number: 42 }]));
+      } else if (req.url?.includes("/issues/42/comments") && req.method === "GET") {
+        // A leftover per-task comment from a previous (sub-threshold) run.
+        res.end(JSON.stringify([{ id: 100, body: "<!-- moon-ci-booster-all-proj0:build -->\nold failure" }]));
+      } else if (req.url?.includes("/issues/42/comments") && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk: Buffer) => {
+          body += chunk.toString();
+        });
+        req.on("end", () => {
+          createdComments.push(JSON.parse(body).body);
+          res.end(JSON.stringify({ id: createdComments.length + 1 }));
+        });
+        return;
+      } else if (req.url?.includes("/issues/comments/") && req.method === "DELETE") {
+        const idMatch = req.url.match(/\/issues\/comments\/(\d+)/);
+        if (idMatch) {
+          deletedCommentIds.push(Number(idMatch[1]));
+        }
+        res.end(JSON.stringify({}));
+      } else {
+        res.end(JSON.stringify([]));
+      }
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+
+    await $({
+      cwd: workDir,
+      env: {
+        ...process.env,
+        ...baseEnv(),
+        GITHUB_REPOSITORY: "test-owner/test-repo",
+        GITHUB_API_URL: `http://127.0.0.1:${port}`,
+      },
+    })`node ${indexJs}`;
+  });
+
+  afterEach(() => {
+    server.close();
+    fs.rmSync(workDir, { recursive: true, force: true });
+  });
+
+  test("posts a single aggregate comment instead of one per task", () => {
+    expect(createdComments).toHaveLength(1);
+    expect(createdComments[0]).toContain("<!-- moon-ci-booster-all-aggregate -->");
+    expect(createdComments[0]).toContain("12 tasks failed");
+  });
+
+  test("aggregate comment lists every failing target", () => {
+    for (let i = 0; i < 12; i++) {
+      expect(createdComments[0]).toContain(`\`proj${i}:build\``);
+    }
+  });
+
+  test("cleans up leftover per-task comments from a previous run", () => {
+    expect(deletedCommentIds).toEqual([100]);
+  });
+});
+
+describe("aggregate comment is cleaned up when failures drop below the threshold", () => {
+  let server: http.Server;
+  let createdComments: string[];
+  let deletedCommentIds: number[];
+  let workDir: string;
+
+  beforeEach(async () => {
+    createdComments = [];
+    deletedCommentIds = [];
+
+    workDir = fs.mkdtempSync(path.join(os.tmpdir(), "aggregate-cleanup-test-"));
+    // Below the default threshold of 10, so per-task comments are posted.
+    writeReportWithFailures(workDir, ["proj0:build", "proj1:build"]);
+
+    server = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+
+      if (req.url?.includes("/commits/") && req.url?.includes("/pulls")) {
+        res.end(JSON.stringify([{ number: 42 }]));
+      } else if (req.url?.includes("/issues/42/comments") && req.method === "GET") {
+        // A leftover aggregate comment from a previous (over-threshold) run.
+        res.end(JSON.stringify([{ id: 200, body: "<!-- moon-ci-booster-all-aggregate -->\nold aggregate" }]));
+      } else if (req.url?.includes("/issues/42/comments") && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk: Buffer) => {
+          body += chunk.toString();
+        });
+        req.on("end", () => {
+          createdComments.push(JSON.parse(body).body);
+          res.end(JSON.stringify({ id: createdComments.length + 1 }));
+        });
+        return;
+      } else if (req.url?.includes("/issues/comments/") && req.method === "DELETE") {
+        const idMatch = req.url.match(/\/issues\/comments\/(\d+)/);
+        if (idMatch) {
+          deletedCommentIds.push(Number(idMatch[1]));
+        }
+        res.end(JSON.stringify({}));
+      } else {
+        res.end(JSON.stringify([]));
+      }
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+
+    await $({
+      cwd: workDir,
+      env: {
+        ...process.env,
+        ...baseEnv(),
+        GITHUB_REPOSITORY: "test-owner/test-repo",
+        GITHUB_API_URL: `http://127.0.0.1:${port}`,
+      },
+    })`node ${indexJs}`;
+  });
+
+  afterEach(() => {
+    server.close();
+    fs.rmSync(workDir, { recursive: true, force: true });
+  });
+
+  test("posts per-task comments and deletes the stale aggregate comment", () => {
+    expect(createdComments).toHaveLength(2);
+    expect(deletedCommentIds).toEqual([200]);
   });
 });
 
